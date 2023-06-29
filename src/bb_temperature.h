@@ -14,67 +14,61 @@
 // limitations under the License.
 //===========================================================================
 
-//
-// Written for the many variants of ESP32 + Capacitive touch LCDs on the market
-//
 #include <Arduino.h>
-#include <Wire.h>
+#include <BitBang_I2C.h>
 
-#ifndef __BB_CAPTOUCH__
-#define __BB_CAPTOUCH__
+#ifndef __BB_TEMP__
+#define __BB_TEMP__
 
-#define CT_SUCCESS 0
-#define CT_ERROR -1
+#define BBT_SUCCESS 0
+#define BBT_ERROR -1
 
 enum {
-  CT_TYPE_FT6X36 = 0,
-  CT_TYPE_GT911
+  BBT_TYPE_AHT20 = 0,
+  BBT_TYPE_BMP180,
+  BBT_TYPE_BME280,
+  BBT_TYPE_SHT3X,
+  BBT_TYPE_HDC1080,
+  BBT_TYPE_HTS221,
+  BBT_TYPE_MCP9808,
+  BBT_TYPE_COUNT
 };
 
-#define GT911_ADDR1 0x5D
-#define GT911_ADDR2 0x14
-#define FT6X36_ADDR 0x38
+#define BBT_ADDR_MCP9808 0x18
+#define BBT_ADDR_AHT20 0x38
+#define BBT_ADDR_HDC1080 0x40
+#define BBT_ADDR_HTS221 0x5f
+#define BBT_ADDR_BME280 0x76
+#define BBT_ADDR_BME680 0x76
+#define BBT_ADDR_SHT3X 0x44
 
-// GT911 registers
-#define GT911_POINT_INFO 0x814E
-#define GT911_POINT_1    0x814F
-#define GT911_CONFIG_FRESH 0x8100
-#define GT911_CONFIG_SIZE 0xb9
-#define GT911_CONFIG_START 0x8047
+#define AHT20_REG_STATUS 0x71
+#define AHT20_REG_RESET 0xBA
+#define AHT20_REG_INIT 0xBE
+#define AHT20_REG_MEASURE 0xAC
 
-// FT6x36 registers
-#define TOUCH_REG_STATUS 0x02
-#define TOUCH_REG_XH 0x03
-#define TOUCH_REG_XL 0x04
-#define TOUCH_REG_YH 0x05
-#define TOUCH_REG_YL 0x06
-#define TOUCH_REG_WEIGHT 0x07
-#define TOUCH_REG_AREA 0x08
-// register offset to info for the second touch point
-#define PT2_OFFSET 6
-typedef struct _fttouchinfo
+// AHT20 status bits
+#define AHT20_CALIBRATED 0x08
+#define AHT20_BUSY 0x80
+
+typedef struct _tagbbtsample
 {
-  int count;
-  uint16_t x[5], y[5];
-  uint8_t pressure[5], area[5];
-} TOUCHINFO;
+   int iTemperature; // Temp in C * 10
+   int iHumidity; // humidity in percent (0-100)
+   int iPressure; // pressure in hpa
+} BBTSAMPLE;
 
-class BBCapTouch
+class BBTemp
 {
 public:
-    BBCapTouch() {}
-    ~BBCapTouch() { Wire.end(); }
+    BBTemp() {}
+    ~BBTemp() {}
 
-    int init(int iSDA, int iSCL, int iRST=-1, int iINT=-1, uint32_t u32Speed=400000);
-    int getSamples(TOUCHINFO *pTI);
+    int init(int iSDA, int iSCL, bool bBitBang, uint32_t u32Speed=400000);
+    int getSamples(BBTSAMPLE *pBS);
  
 private:
     int _iAddr;
     int _iType;
-    bool I2CTest(uint8_t u8Addr);
-    int I2CRead(uint8_t u8Addr, uint8_t *pData, int iLen);
-    int I2CReadRegister(uint8_t u8Addr, uint8_t u8Register, uint8_t *pData, int iLen);
-    int I2CReadRegister16(uint8_t u8Addr, uint16_t u16Register, uint8_t *pData, int iLen);
-    int I2CWrite(uint8_t u8Addr, uint8_t *pData, int iLen);
-}; // class BBCapTouch
-#endif // __BB_CAPTOUCH__
+}; // class BBTemp
+#endif // __BB_TEMP__
