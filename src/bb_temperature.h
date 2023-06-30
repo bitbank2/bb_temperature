@@ -23,8 +23,13 @@
 #define BBT_SUCCESS 0
 #define BBT_ERROR -1
 
+#define BBT_CAP_TEMPERATURE 1
+#define BBT_CAP_HUMIDITY 2
+#define BBT_CAP_PRESSURE 4
+
 enum {
-  BBT_TYPE_AHT20 = 0,
+  BBT_TYPE_UNKNOWN = 0,
+  BBT_TYPE_AHT20,
   BBT_TYPE_BMP180,
   BBT_TYPE_BME280,
   BBT_TYPE_SHT3X,
@@ -42,6 +47,28 @@ enum {
 #define BBT_ADDR_BME680 0x76
 #define BBT_ADDR_SHT3X 0x44
 
+#define BME280_REG_WHOAMI       0xd0
+#define BME280_REG_CTRL_HUM     0xf2
+#define BME280_REG_CTRL_STATUS  0xf3
+#define BME280_REG_CTRL_MEAS    0xf4
+#define BME280_REG_CONFIG       0xf5
+// WHOAMI register value for the BME280
+#define BME280_DEVICE_ID        0x60
+enum {
+    BME280_SLEEP_MODE = 0,
+    BME280_FORCED_MODE,
+    BME280_FORCED_MODE2,
+    BME280_NORMAL_MODE
+};
+
+enum {
+    BME280_OVERSAMPLE1=1,
+    BME280_OVERSAMPLE2,
+    BME280_OVERSAMPLE4,
+    BME280_OVERSAMPLE8,
+    BME280_OVERSAMPLE16
+};
+
 #define AHT20_REG_STATUS 0x71
 #define AHT20_REG_RESET 0xBA
 #define AHT20_REG_INIT 0xBE
@@ -51,24 +78,35 @@ enum {
 #define AHT20_CALIBRATED 0x08
 #define AHT20_BUSY 0x80
 
+#define HDC_REG_TEMPERATURE 0x00
+#define HDC_REG_HUMIDITY    0x01
+#define HDC_REG_CONFIG      0x02
+#define HDC_REG_DEVICEID    0xff
+#define HDC_VAL_DEVICEID    0x1050
+
 typedef struct _tagbbtsample
 {
-   int iTemperature; // Temp in C * 10
-   int iHumidity; // humidity in percent (0-100)
-   int iPressure; // pressure in hpa
-} BBTSAMPLE;
+   int temperature; // Temp in C * 10
+   int humidity; // humidity in percent (0-100)
+   int pressure; // pressure in hpa
+} BBT_SAMPLE;
 
 class BBTemp
 {
 public:
-    BBTemp() {}
+    BBTemp() { _iType = BBT_TYPE_UNKNOWN; _u32Caps = 0; }
     ~BBTemp() {}
-
-    int init(int iSDA, int iSCL, bool bBitBang, uint32_t u32Speed=400000);
-    int getSamples(BBTSAMPLE *pBS);
+    int type(void);
+    uint32_t caps(void);
+    int init(int iSDA = -1, int iSCL = -1, bool bBitBang = false, uint32_t u32Speed=400000);
+    int start(void);
+    void stop(void);
+    int getSample(BBT_SAMPLE *pBS);
  
 private:
     int _iAddr;
     int _iType;
+    uint32_t _u32Caps;
+    BBI2C _bbi2c;
 }; // class BBTemp
 #endif // __BB_TEMP__
