@@ -21,6 +21,7 @@
 int BBTemp::start(void)
 {
 uint8_t ucTemp[4];
+uint8_t ucCal[34];
 
    switch (_iType) {
       case BBT_TYPE_AHT20:
@@ -37,6 +38,61 @@ uint8_t ucTemp[4];
          ucTemp[0] = (uint8_t)(SHT3X_SOFTRESET >> 8);
          ucTemp[1] = (uint8_t)SHT3X_SOFTRESET;
          I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         break;
+
+      case BBT_TYPE_BME280:
+         // Read 24 bytes of calibration data
+         I2CReadRegister(&_bbi2c, _iAddr, 0x88, ucCal, 24); // 24 from register 0x88
+         I2CReadRegister(&_bbi2c, _iAddr, 0xa1, &ucCal[24], 1); // get humidity calibration byte
+         I2CReadRegister(&_bbi2c, _iAddr, 0xe1, &ucCal[25], 7); // get 7 more humidity calibration bytes
+         // Prepare temperature calibration data
+         _calT1 = (uint32_t)ucCal[0] + ((uint32_t)ucCal[1] << 8);
+         _calT2 = (uint32_t)ucCal[2] + ((uint32_t)ucCal[3] << 8);
+         if (_calT2 > 32767L) _calT2 -= 65536L; // negative value
+         _calT3 = (uint32_t)ucCal[4] + ((uint32_t)ucCal[5] << 8);
+         if (_calT3 > 32767L) _calT3 -= 65536L;
+
+         // Prepare pressure calibration data
+         _calP1 = (uint32_t)ucCal[6] + ((uint32_t)ucCal[7] << 8);
+         _calP2 =(uint32_t) ucCal[8] + ((uint32_t)ucCal[9] << 8);
+         if (_calP2 > 32767L) _calP2 -= 65536L; // signed short
+         _calP3 = (uint32_t)ucCal[10] + ((uint32_t)ucCal[11] << 8);
+         if (_calP3 > 32767L) _calP3 -= 65536L;
+         _calP4 = (uint32_t)ucCal[12] + ((uint32_t)ucCal[13] << 8);
+         if (_calP4 > 32767L) _calP4 -= 65536L;
+         _calP5 = (uint32_t)ucCal[14] + ((uint32_t)ucCal[15] << 8);
+         if (_calP5 > 32767L) _calP5 -= 65536L;
+         _calP6 = (uint32_t)ucCal[16] + ((uint32_t)ucCal[17] << 8);
+         if (_calP6 > 32767L) _calP6 -= 65536L;
+         _calP7 = (uint32_t)ucCal[18] + ((uint32_t)ucCal[19] << 8);
+         if (_calP7 > 32767L) _calP7 -= 65536L;
+         _calP8 = (uint32_t)ucCal[20] + ((uint32_t)ucCal[21] << 8);
+         if (_calP8 > 32767L) _calP8 -= 65536L;
+         _calP9 = (uint32_t)ucCal[22] + ((uint32_t)ucCal[23] << 8);
+         if (_calP9 > 32767L) _calP9 -= 65536L;
+
+         // Prepare humidity calibration data
+         _calH1 = (uint32_t)ucCal[24];
+         _calH2 = (uint32_t)ucCal[25] + ((uint32_t)ucCal[26] << 8);
+         if (_calH2 > 32767L) _calH2 -= 65536L;
+         _calH3 = (uint32_t)ucCal[27];
+         _calH4 = ((uint32_t)ucCal[28] << 4) + ((uint32_t)ucCal[29] & 0xf);
+         if (_calH4 > 2047L) _calH4 -= 4096L; // signed 12-bit
+         _calH5 = ((uint32_t)ucCal[30] << 4) + ((uint32_t)ucCal[29] >> 4);
+         if (_calH5 > 2047L) _calH5 -= 4096L;
+         _calH6 = (uint32_t)ucCal[31];
+         if (_calH6 > 127L) _calH6 -= 256L; // signed char
+
+         // Must set config in sleep mode
+         ucTemp[0] = BME280_REG_CONFIG;
+         ucTemp[1] = 0xa0; // set stand by time to 1 second
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // config
+         ucTemp[0] = BME280_REG_CTRL_HUM;
+         ucTemp[1] = BME280_OVERSAMPLE1; // humidity over sampling rate = 1
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // control humidity register
+         ucTemp[0] = BME280_REG_CTRL_MEAS;
+         ucTemp[1] = BME280_NORMAL_MODE | (BME280_OVERSAMPLE1 << 2) | (BME280_OVERSAMPLE1 << 5); // normal mode, temp and pressure over sampling rate=1
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // control measurement register
          break;
 
       default:
@@ -56,6 +112,12 @@ uint8_t ucTemp[4];
       case BBT_TYPE_AHT20:
          ucTemp[0] = AHT20_REG_RESET; // reset
          I2CWrite(&_bbi2c, _iAddr, ucTemp, 1);
+         break;
+
+      case BBT_TYPE_BME280:
+         ucTemp[0] = BME280_REG_CTRL_MEAS;
+         ucTemp[1] = BME280_SLEEP_MODE;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // control measurement register
          break;
    } // switch
 } /* stop() */
@@ -180,6 +242,55 @@ uint32_t ST, SRH;
          pBS->temperature |= ucTemp[5];
          pBS->temperature >>= 10;
          pBS->temperature = ((pBS->temperature * 2000) >> 10) - 500; // get T in C x 10 for decimal place
+         break;
+
+      case BBT_TYPE_BME280:
+         {
+         uint8_t i, ucTemp[16];
+         int32_t t, p, h; // raw sensor values
+         int32_t var1,var2,t_fine;
+         int64_t P_64;
+         int64_t var1_64, var2_64;
+
+         I2CReadRegister(&_bbi2c, _iAddr, 0xf7, ucTemp, 8); // start of data regs
+         p = ((uint32_t)ucTemp[0] << 12) + ((uint32_t)ucTemp[1] << 4) + ((uint32_t)ucTemp[2] >> 4);
+         t = ((uint32_t)ucTemp[3] << 12) + ((uint32_t)ucTemp[4] << 4) + ((uint32_t)ucTemp[5] >> 4);
+         h = ((uint32_t)ucTemp[6] << 8) + (uint32_t)ucTemp[7];
+         // Calculate calibrated temperature value
+         // the value is 10x C (e.g. 260 = 26.0C)
+         var1 = ((((t >> 3) - (_calT1 <<1))) * (_calT2)) >> 11;
+         var2 = (((((t >> 4) - (_calT1)) * ((t>>4) - (_calT1))) >> 12) * (_calT3)) >> 14;
+         t_fine = var1 + var2;
+         t_fine = ((t_fine * 5 + 128) >> 8);
+         pBS->temperature = (((uint32_t)t_fine*6553)>>16) - 15L; // for some reason, the reported temp is too high, subtract 1.5C
+
+         // Calculate calibrated pressure value
+         var1_64 = t_fine - 128000LL;
+         var2_64 = var1_64 * var1_64 * (int64_t)_calP6;
+         var2_64 = var2_64 + ((var1_64 * (int64_t)_calP5) << 17);
+         var2_64 = var2_64 + (((int64_t)_calP4) << 35);
+         var1_64 = ((var1_64 * var1_64 * (int64_t)_calP3)>>8) + ((var1_64 * (int64_t)_calP2)<<12);
+         var1_64 = (((((int64_t)1)<<47)+var1_64))*((int64_t)_calP1)>>33;
+         if (var1_64 == 0) {
+            pBS->pressure = 0;
+         } else {
+            P_64 = 1048576LL - p;
+            P_64 = (((P_64<<31)-var2_64)*3125LL)/var1_64;
+            var1_64 = (((int64_t)_calP9) * (P_64>>13) * (P_64>>13)) >> 25;
+            var2_64 = (((int64_t)_calP8) * P_64) >> 19;
+            P_64 = ((P_64 + var1_64 + var2_64) >> 8) + (((int64_t)_calP7)<<4);
+            pBS->pressure = (uint32_t)(P_64 / 100LL);
+         }
+         // Calculate calibrated humidity value
+         var1 = (t_fine - 76800L);
+         var1 = (((((h << 14) - ((_calH4) << 20) - ((_calH5) * var1)) +
+                (16384L)) >> 15) * (((((((var1 * (_calH6)) >> 10) * (((var1 * (_calH3)) >> 11) + (32768L))) >> 10) + (2097152L)) * (_calH2) + 8192L) >> 14));
+         var1 = (var1 - (((((var1 >> 15) * (var1 >> 15)) >> 7) * (_calH1)) >> 4));
+         var1 = (var1 < 0? 0 : var1);
+         var1 = ((uint32_t)var1 > 419430400UL ? 419430400UL : var1);
+         var1 = (uint32_t)(var1 >> 12); // humidity * 1024;
+         pBS->humidity = var1 >> 10; // humidity (0-100)
+         }
          break;
 
       default:

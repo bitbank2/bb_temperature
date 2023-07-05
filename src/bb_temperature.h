@@ -121,5 +121,9 @@ private:
     int _iType;
     uint32_t _u32Caps;
     BBI2C _bbi2c;
+    int32_t _calT1, _calT2, _calT3; // calibration data
+    int32_t _calP1, _calP2, _calP3, _calP4, _calP5, _calP6, _calP7, _calP8, _calP9;
+    int32_t _calH1, _calH2, _calH3, _calH4, _calH5, _calH6;
+
 }; // class BBTemp
 #endif // __BB_TEMP__
