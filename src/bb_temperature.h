@@ -21,7 +21,8 @@
 #define __BB_TEMP__
 
 #define BBT_SUCCESS 0
-#define BBT_ERROR -1
+#define BBT_NOT_READY 1
+#define BBT_ERROR 2
 
 #define BBT_CAP_TEMPERATURE 1
 #define BBT_CAP_HUMIDITY 2

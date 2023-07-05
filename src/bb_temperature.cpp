@@ -14,11 +14,27 @@
 // limitations under the License.
 //===========================================================================
 #include "bb_temperature.h"
+
 //
 // Tell the sensor to start sampling
 //
 int BBTemp::start(void)
 {
+uint8_t ucTemp[4];
+
+   switch (_iType) {
+      case BBT_TYPE_AHT20:
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 1); // first byte read is status byte
+         if ((ucTemp[0] & AHT20_CALIBRATED) == 0) { // need to init
+            ucTemp[0] = AHT20_REG_INIT; // initialize
+            ucTemp[1] = 0x08;
+            ucTemp[2] = 0x00;
+            I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
+         }
+         break;
+      default:
+         return BBT_ERROR; // unsupported value
+   } // switch
    return BBT_SUCCESS;
 } /* start() */
 
@@ -27,6 +43,14 @@ int BBTemp::start(void)
 //
 void BBTemp::stop(void)
 {
+uint8_t ucTemp[4];
+
+   switch (_iType) {
+      case BBT_TYPE_AHT20:
+         ucTemp[0] = AHT20_REG_RESET; // reset
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 1);
+         break;
+   } // switch
 } /* stop() */
 
 //
@@ -91,6 +115,31 @@ uint32_t BBTemp::caps(void)
 
 int BBTemp::getSample(BBT_SAMPLE *pBS)
 {
+uint8_t ucTemp[8];
 
+   switch (_iType) {
+      case BBT_TYPE_AHT20:
+         ucTemp[0] = AHT20_REG_MEASURE; // trigger a measurement
+         ucTemp[1] = 0x33;
+         ucTemp[2] = 0x00;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
+         delay(75); // wait for measurement to complete
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 1); // first byte read is status byte
+         if (ucTemp[0] & AHT20_BUSY)
+            return BBT_NOT_READY;
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 6); // status + 5 data
+         pBS->humidity = ucTemp[1] << 12;
+         pBS->humidity |= ucTemp[2] << 4;
+         pBS->humidity |= (ucTemp[3] >> 4);
+         pBS->humidity = (pBS->humidity * 1000) >> 20; // convert to integer percentage
+         pBS->temperature = (ucTemp[3] & 0xf) << 16;
+         pBS->temperature |= (ucTemp[4] << 8);
+         pBS->temperature |= ucTemp[5];
+         pBS->temperature >>= 10;
+         pBS->temperature = ((pBS->temperature * 2000) >> 10) - 500; // get T in C x 10 for decimal place
+         break;
+      default:
+         return BBT_ERROR;
+   } // switch
    return BBT_SUCCESS;
 } /* getSample() */
