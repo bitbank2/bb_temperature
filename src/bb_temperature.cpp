@@ -32,8 +32,15 @@ uint8_t ucTemp[4];
             I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
          }
          break;
+
+      case BBT_TYPE_SHT3X:
+         ucTemp[0] = (uint8_t)(SHT3X_SOFTRESET >> 8);
+         ucTemp[1] = (uint8_t)SHT3X_SOFTRESET;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         break;
+
       default:
-         return BBT_ERROR; // unsupported value
+         return BBT_ERROR; // unsupported type
    } // switch
    return BBT_SUCCESS;
 } /* start() */
@@ -99,6 +106,18 @@ int rc, iOff;
            }
         } // if HDC1080
 
+        if (I2CTest(&_bbi2c, BBT_ADDR_SHT3X+iOff)) {
+           ucTemp[0] = 0xf3; ucTemp[1] = 0x2d; // read status command
+           I2CWrite(&_bbi2c, BBT_ADDR_SHT3X+iOff, ucTemp, 2);
+           I2CRead(&_bbi2c, BBT_ADDR_SHT3X+iOff, ucTemp, 3); // read status bits
+           if ((ucTemp[1] & 0x10) == 0x10) { // yes, it's the SHT3X
+               _iAddr = BBT_ADDR_SHT3X+iOff;
+               _iType = BBT_TYPE_SHT3X;
+               _u32Caps = BBT_CAP_TEMPERATURE | BBT_CAP_HUMIDITY;
+               return BBT_SUCCESS;
+           }
+        } // if SHT3X
+
     } // for each address permutation
     return BBT_ERROR;
 } /* init() */
@@ -116,8 +135,32 @@ uint32_t BBTemp::caps(void)
 int BBTemp::getSample(BBT_SAMPLE *pBS)
 {
 uint8_t ucTemp[8];
+uint32_t ST, SRH;
 
    switch (_iType) {
+      case BBT_TYPE_SHT3X:
+         ucTemp[0] = (uint8_t)(SHT3X_MEAS_HIGHREP >> 8);
+         ucTemp[1] = (uint8_t)SHT3X_MEAS_HIGHREP;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         delay(50);
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 6);
+         ST = (uint32_t)ucTemp[0] << 8;
+         ST |= ucTemp[1];
+         //if (ucTemp[2] != sht3x_crc8(ucTemp, 2))
+         //   return SL_ERROR; // DEBUG
+         SRH = (uint32_t)ucTemp[3] << 8;
+         SRH |= ucTemp[4];
+         //if (ucTemp[5] != sht3x_crc8(&ucTemp[3], 2))
+         //   return SL_ERROR; // DEBUG
+         ST *= 1750; // 10x temp
+         ST >>= 16;
+         ST -= 450;
+         pBS->temperature = (int)ST;
+         SRH *= 100; // RH
+         SRH >>= 16;
+         pBS->humidity = (int)SRH;
+         break;
+
       case BBT_TYPE_AHT20:
          ucTemp[0] = AHT20_REG_MEASURE; // trigger a measurement
          ucTemp[1] = 0x33;
@@ -131,13 +174,14 @@ uint8_t ucTemp[8];
          pBS->humidity = ucTemp[1] << 12;
          pBS->humidity |= ucTemp[2] << 4;
          pBS->humidity |= (ucTemp[3] >> 4);
-         pBS->humidity = (pBS->humidity * 1000) >> 20; // convert to integer percentage
+         pBS->humidity = (pBS->humidity * 100) >> 20; // convert to integer percentage
          pBS->temperature = (ucTemp[3] & 0xf) << 16;
          pBS->temperature |= (ucTemp[4] << 8);
          pBS->temperature |= ucTemp[5];
          pBS->temperature >>= 10;
          pBS->temperature = ((pBS->temperature * 2000) >> 10) - 500; // get T in C x 10 for decimal place
          break;
+
       default:
          return BBT_ERROR;
    } // switch
