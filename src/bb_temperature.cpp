@@ -95,6 +95,14 @@ uint8_t ucCal[34];
          I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // control measurement register
          break;
 
+      case BBT_TYPE_HDC1080:
+         ucTemp[0] = HDC_REG_CONFIG; // config register
+         ucTemp[1] = 0x10; // temp+humidity, 14-bit resolution
+         ucTemp[2] = 0x00;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
+         delay(100); // give it time to power up
+         break; // HDC1080
+
       default:
          return BBT_ERROR; // unsupported type
    } // switch
@@ -118,6 +126,13 @@ uint8_t ucTemp[4];
          ucTemp[0] = BME280_REG_CTRL_MEAS;
          ucTemp[1] = BME280_SLEEP_MODE;
          I2CWrite(&_bbi2c, _iAddr, ucTemp, 2); // control measurement register
+         break;
+
+      case BBT_TYPE_HDC1080:
+         ucTemp[0] = HDC_REG_CONFIG; // config register
+         ucTemp[1] = 0x80; // software reset
+         ucTemp[2] = 0x00;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
          break;
    } // switch
 } /* stop() */
@@ -291,6 +306,17 @@ uint32_t ST, SRH;
          var1 = (uint32_t)(var1 >> 12); // humidity * 1024;
          pBS->humidity = var1 >> 10; // humidity (0-100)
          }
+         break;
+
+      case BBT_TYPE_HDC1080:
+         ucTemp[0] = HDC_REG_TEMPERATURE;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 1); // read temp register
+         delay(15); // wait for conversion we just triggered
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 4); // read temp+humidity
+         pBS->temperature = ((uint16_t)ucTemp[0]<<8) + ucTemp[1];
+         pBS->humidity = ((uint16_t)ucTemp[2]<<8) + ucTemp[3];
+         pBS->temperature = ((pBS->temperature * 1650) >> 16) - 400; // 10x temp
+         pBS->temperature -= 84; // adjustment that seems to give a more accurate result
          break;
 
       default:
