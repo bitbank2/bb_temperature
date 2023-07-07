@@ -16,6 +16,18 @@
 #include "bb_temperature.h"
 
 //
+// Some sensors like the HTS221 can't read multiple bytes in 1 transaction
+//
+void BBTemp::readMultiple(int iRegister, uint8_t *pData, int iCount)
+{   
+int i;
+    
+    for (i=0; i<iCount; i++) { // must read each byte 1 at a time
+        I2CReadRegister(&_bbi2c, _iAddr, iRegister + i, &pData[i], 1);
+    }
+} /* readMultiple() */ 
+
+//
 // Tell the sensor to start sampling
 //
 int BBTemp::start(void)
@@ -103,6 +115,44 @@ uint8_t ucCal[34];
          delay(100); // give it time to power up
          break; // HDC1080
 
+      case BBT_TYPE_HTS221:
+         {
+         uint8_t h0rH, h1rH;
+         uint16_t t0degC, t1degC;
+         int16_t h0t0Out, h1t0Out, t0Out, t1Out;
+
+         // Read calibration data
+         I2CReadRegister(&_bbi2c, _iAddr, HTS221_H0_rH_x2_REG, &h0rH, 1);
+         I2CReadRegister(&_bbi2c, _iAddr, HTS221_H1_rH_x2_REG, &h1rH, 1);
+         I2CReadRegister(&_bbi2c, _iAddr, HTS221_T0_degC_x8_REG, ucTemp, 1);
+         I2CReadRegister(&_bbi2c, _iAddr, HTS221_T1_degC_x8_REG, &ucTemp[1], 1);
+         I2CReadRegister(&_bbi2c, _iAddr, HTS221_T1_T0_MSB_REG, &ucTemp[2], 1);
+         t0degC = ucTemp[0] | ((ucTemp[2] & 0x03) << 8);
+         t1degC = ucTemp[1] | ((ucTemp[2] & 0x0c) << 6);
+         readMultiple(HTS221_H0_T0_OUT_REG, ucTemp, 2);
+         readMultiple(HTS221_H1_T0_OUT_REG, &ucTemp[2], 2);
+         h0t0Out = ucTemp[0] | (ucTemp[1] << 8);
+         h1t0Out = ucTemp[2] | (ucTemp[3] << 8);
+         readMultiple(HTS221_T0_OUT_REG, ucTemp, 2);
+         readMultiple(HTS221_T1_OUT_REG, &ucTemp[2], 2);
+         t0Out = ucTemp[0] | (ucTemp[1] << 8);
+         t1Out = ucTemp[2] | (ucTemp[3] << 8);
+
+         // calculate slopes and 0 offset from calibration values,
+         // for future calculations: value = a * X + b
+
+         _hts221HumiditySlope = (h1rH - h0rH) / (2.0f * (h1t0Out - h0t0Out));
+         _hts221HumidityZero = (h0rH / 2.0f) - _hts221HumiditySlope * h0t0Out;
+         _hts221TemperatureSlope = (float)(t1degC - t0degC) / (8.0f * (float)(t1Out - t0Out));
+         _hts221TemperatureZero = ((float)t0degC / 8.0f) - _hts221TemperatureSlope * (float)t0Out;
+
+         // turn it on
+         ucTemp[0] = HTS221_CTRL1_REG; // control register 1
+         ucTemp[1] = 0x80;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         }
+         break; // HTS221
+
       default:
          return BBT_ERROR; // unsupported type
    } // switch
@@ -163,6 +213,16 @@ int rc, iOff;
            }
         } // if AHT20
 
+        if (I2CTest(&_bbi2c, BBT_ADDR_HTS221+iOff)) { // check for HTS221
+           rc = I2CReadRegister(&_bbi2c, BBT_ADDR_HTS221+iOff, HTS221_WHO_AM_I_REG, ucTemp, 1);
+           if (rc && ucTemp[0] == HTS221_WHO_AM_I_VAL) {
+              _iAddr = BBT_ADDR_HTS221+iOff;
+              _iType = BBT_TYPE_HTS221;
+              _u32Caps = BBT_CAP_TEMPERATURE | BBT_CAP_HUMIDITY;
+              return BBT_SUCCESS;
+           }
+        } // if HTS221
+
         if (I2CTest(&_bbi2c, BBT_ADDR_BME280+iOff)) { // check for Bosch BME280
            rc = I2CReadRegister(&_bbi2c, BBT_ADDR_BME280+iOff, BME280_REG_WHOAMI, ucTemp, 1);
            if (rc && ucTemp[0] == BME280_DEVICE_ID) { // yes
@@ -213,8 +273,36 @@ int BBTemp::getSample(BBT_SAMPLE *pBS)
 {
 uint8_t ucTemp[8];
 uint32_t ST, SRH;
+int bReady;
 
    switch (_iType) {
+      case BBT_TYPE_HTS221:
+         {
+         uint16_t t, h;
+         float tf, hf;
+
+         // trigger a sample
+         ucTemp[0] = HTS221_CTRL2_REG;
+         ucTemp[1] = 1;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         // wait for completion
+         bReady = 0;
+         while (!bReady) {
+           I2CReadRegister(&_bbi2c, _iAddr, HTS221_STATUS_REG, ucTemp, 1);
+           bReady = ((ucTemp[0] & 3) == 3); // both temp & humidity samples ready
+           delay(25);
+         } // while
+         // read ADC raw data for temp and humidity and 'fix' them
+         readMultiple(HTS221_HUMIDITY_OUT_L_REG, ucTemp, 4);
+         h = ucTemp[0] | ((uint16_t)ucTemp[1] << 8);
+         t = ucTemp[2] | ((uint16_t)ucTemp[3] << 8);
+         tf = (t * _hts221TemperatureSlope + _hts221TemperatureZero);
+         hf = (h * _hts221HumiditySlope + _hts221HumidityZero);
+         pBS->temperature = (int)(tf * 10.0f);
+         pBS->humidity = 170 + (int)hf;
+         }
+         break;
+
       case BBT_TYPE_SHT3X:
          ucTemp[0] = (uint8_t)(SHT3X_MEAS_HIGHREP >> 8);
          ucTemp[1] = (uint8_t)SHT3X_MEAS_HIGHREP;

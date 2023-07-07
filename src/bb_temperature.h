@@ -97,6 +97,23 @@ enum {
 #define SHT3X_HEATEREN             0x306D
 #define SHT3X_HEATERDIS            0x3066
 
+#define HTS221_WHO_AM_I_REG         0x0f
+#define HTS221_WHO_AM_I_VAL         0xbc
+#define HTS221_CTRL1_REG            0x20
+#define HTS221_CTRL2_REG            0x21
+#define HTS221_STATUS_REG           0x27
+#define HTS221_HUMIDITY_OUT_L_REG   0x28
+#define HTS221_TEMP_OUT_L_REG       0x2a
+#define HTS221_H0_rH_x2_REG         0x30
+#define HTS221_H1_rH_x2_REG         0x31
+#define HTS221_T0_degC_x8_REG       0x32
+#define HTS221_T1_degC_x8_REG       0x33
+#define HTS221_T1_T0_MSB_REG        0x35
+#define HTS221_H0_T0_OUT_REG        0x36
+#define HTS221_H1_T0_OUT_REG        0x3a
+#define HTS221_T0_OUT_REG           0x3c
+#define HTS221_T1_OUT_REG           0x3e
+
 typedef struct _tagbbtsample
 {
    int temperature; // Temp in C * 10
@@ -124,6 +141,11 @@ private:
     int32_t _calT1, _calT2, _calT3; // calibration data
     int32_t _calP1, _calP2, _calP3, _calP4, _calP5, _calP6, _calP7, _calP8, _calP9;
     int32_t _calH1, _calH2, _calH3, _calH4, _calH5, _calH6;
+    float _hts221HumiditySlope;
+    float _hts221HumidityZero;
+    float _hts221TemperatureSlope;
+    float _hts221TemperatureZero;
+    void readMultiple(int iRegister, uint8_t *pData, int iCount);
 
 }; // class BBTemp
 #endif // __BB_TEMP__
