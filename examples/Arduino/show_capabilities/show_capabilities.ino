@@ -58,7 +58,7 @@ void loop()
           Serial.println(szTemp);
        }
        if (u32Caps & BBT_CAP_PRESSURE) {
-          sprintf(szTemp, "Pressuer: %d hPa", bbts.pressure);
+          sprintf(szTemp, "Pressure: %d hPa", bbts.pressure);
           Serial.println(szTemp);
        }
        delay(1000); // One sample per second is typical of temperature sensors
