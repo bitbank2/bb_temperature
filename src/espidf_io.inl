@@ -230,7 +230,6 @@ int rc;
 //return (rc == 1) ? (iOldLen - iLen) : 0; // 0 indicates bad ack from sending a byte
 } /* BBI2CWrite() */
 
-#ifdef FUTURE
 static int BBI2CRead(uint8_t addr, uint8_t *pData, int iLen)
 {
     i2cBegin(addr, 1);
@@ -241,7 +240,7 @@ static int BBI2CRead(uint8_t addr, uint8_t *pData, int iLen)
     i2cEnd();
     return 1;
 } /* BBI2CRead() */
-#endif
+
 static int I2CTest(BBI2C *pI2C, uint8_t addr)
 {
      int response = 0;
@@ -343,7 +342,6 @@ int i = 0;
     return i;
 } /* I2CRead() */
 
-#ifdef FUTURE
 static int I2CReadRegister(BBI2C *pI2C, unsigned char iAddr, unsigned char u8Register, unsigned char *pData, int iLen)
 {
     if (pI2C->bWire) {
@@ -355,5 +353,5 @@ static int I2CReadRegister(BBI2C *pI2C, unsigned char iAddr, unsigned char u8Reg
     }
     return iLen;
 } /* I2CReadRegister() */
-#endif // FUTURE
+
 #endif // __BB_TEMPERATURE_IO__ 

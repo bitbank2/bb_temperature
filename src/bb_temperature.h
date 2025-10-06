@@ -30,7 +30,6 @@
 #include <linux/spi/spidev.h>
 #include <linux/i2c-dev.h>
 #include <time.h>
-
 #else // !LINUX
 #ifdef ARDUINO
 #include <Arduino.h>

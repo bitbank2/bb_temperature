@@ -15,6 +15,14 @@
 //===========================================================================
 #include "bb_temperature.h"
 
+#if !defined(ARDUINO) && !defined(__LINUX__)
+#include "espidf_io.inl"
+#endif
+
+#ifdef __LINUX__
+#include "linux_io.inl"
+#endif // __LINUX__
+
 //
 // Some sensors like the HTS221 can't read multiple bytes in 1 transaction
 //
@@ -53,8 +61,6 @@ int BBTemp::start(void)
 {
 uint8_t ucTemp[4];
 uint8_t ucCal[34];
-int16_t i16;
-uint32_t u32;
 
    switch (_iType) {
       case BBT_TYPE_MCP9808:
@@ -412,7 +418,6 @@ int bReady;
          int64_t partial_data4;
          int64_t partial_data5;
          int64_t partial_data6;
-         int64_t comp_temp;
 
          I2CReadRegister(&_bbi2c, _iAddr, BMP388_DATA_ADDR, ucTemp, BMP388_DATA_LEN); // start of data regs
          t = (uint32_t)ucTemp[3] + ((uint32_t)ucTemp[4] << 8) + ((uint32_t)ucTemp[5] << 16);
@@ -537,7 +542,7 @@ int bReady;
 
       case BBT_TYPE_BME280:
          {
-         uint8_t i, ucTemp[16];
+         uint8_t ucTemp[16];
          int32_t t, p, h; // raw sensor values
          int32_t var1,var2,t_fine;
          int64_t P_64;
