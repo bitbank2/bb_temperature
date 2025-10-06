@@ -49,10 +49,13 @@ int iChannel = pI2C->iSDA;
 static uint8_t I2CTest(BBI2C *pI2C, uint8_t addr)
 {
 uint8_t response = 0;
+
     if (ioctl(pI2C->file_i2c, I2C_SLAVE, addr) >= 0) {
             // probe this address
         uint8_t ucTemp;
-        if (read(pI2C->file_i2c, &ucTemp, 1) >= 0)
+        ucTemp = 0;
+	write(pI2C->file_i2c, &ucTemp, 1);
+	if (read(pI2C->file_i2c, &ucTemp, 1) >= 0)
             response = 1;
     }
     return response;
@@ -67,7 +70,7 @@ int rc;
         rc = read(pI2C->file_i2c, pData, iLen);
         return rc;
 } /* I2CRead() */
-#ifdef FUTURE
+
 //
 // Read n bytes from the given address, after setting the register number
 //
@@ -85,7 +88,7 @@ int rc;
         return rc;
 
 } /* I2CReadRegister() */
-#endif // FUTURE
+
 //
 // Write n bytes to the given address
 //
