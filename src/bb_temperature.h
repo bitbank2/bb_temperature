@@ -1,8 +1,10 @@
 //
-// BitBank Capacitive Touch Sensor Library
+// BitBank Temperature Sensor Library
 // written by Larry Bank
+// email: bitbank@pobox.com
 //
-// Copyright 2023 BitBank Software, Inc. All Rights Reserved.
+// Copyright 2023-2025 BitBank Software, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,12 +15,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //===========================================================================
-
-#include <Arduino.h>
-#include <BitBang_I2C.h>
-
 #ifndef __BB_TEMP__
 #define __BB_TEMP__
+
+#ifdef __LINUX__
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/types.h>
+#include <linux/spi/spidev.h>
+#include <linux/i2c-dev.h>
+#include <time.h>
+
+#else // !LINUX
+#ifdef ARDUINO
+#include <Arduino.h>
+#include <BitBang_I2C.h>
+#else // esp-idf?
+#include <stdint.h>
+#endif // ARDUINO
+#endif // !__LINUX__
+
+// For Linux and esp-idf we add a file/device handle member
+// to the BBI2C structure
+#if !defined( ARDUINO ) && !defined(__BB_I2C__)
+#define __BB_I2C__
+typedef struct _tagbbi2c
+{
+  int file_i2c;
+  uint8_t iSDA, iSCL;
+  uint8_t bWire;
+} BBI2C;
+#endif
 
 #define BBT_SUCCESS 0
 #define BBT_NOT_READY 1
@@ -33,6 +65,7 @@ enum {
   BBT_TYPE_AHT20,
   BBT_TYPE_BMP180,
   BBT_TYPE_BME280,
+  BBT_TYPE_BMP388,
   BBT_TYPE_SHT3X,
   BBT_TYPE_HDC1080,
   BBT_TYPE_HTS221,
@@ -45,6 +78,7 @@ enum {
 #define BBT_ADDR_HDC1080 0x40
 #define BBT_ADDR_HTS221 0x5f
 #define BBT_ADDR_BME280 0x76
+#define BBT_ADDR_BMP388 0x76 
 #define BBT_ADDR_BME680 0x76
 #define BBT_ADDR_SHT3X 0x44
 
@@ -70,6 +104,16 @@ enum {
     BME280_OVERSAMPLE16
 };
 
+#define BMP388_STATUS_ADDR 0x03
+#define BMP388_CMD_ADDR 0x7e
+#define BMP388_CMD_READY 0x10
+#define BMP388_CMD_SOFTRESET 0xb6
+#define BMP388_CALIB_DATA 0x31
+#define BMP388_CALIB_LEN 21
+#define BMP388_POWER_CTRL 0x1b
+#define BMP388_DATA_ADDR 0x04
+#define BMP388_DATA_LEN 6
+
 #define AHT20_REG_STATUS 0x71
 #define AHT20_REG_RESET 0xBA
 #define AHT20_REG_INIT 0xBE
@@ -79,6 +123,13 @@ enum {
 #define AHT20_CALIBRATED 0x08
 #define AHT20_BUSY 0x80
 
+// MCP9808
+#define MCP_REG_TEMPERATURE 0x05
+#define MCP_REG_CONFIG      0x01
+#define MCP_REG_WHOAMI      0x06
+#define MCP_VAL_WHOAMI      0x0054
+
+// HDC1080
 #define HDC_REG_TEMPERATURE 0x00
 #define HDC_REG_HUMIDITY    0x01
 #define HDC_REG_CONFIG      0x02
@@ -129,23 +180,28 @@ public:
     int type(void);
     uint32_t caps(void);
     int init(int iSDA = -1, int iSCL = -1, bool bBitBang = false, uint32_t u32Speed=400000);
+    int init(BBI2C *pBB);
+    BBI2C *getBB() { return &_bbi2c; }
     int start(void);
     void stop(void);
     int getSample(BBT_SAMPLE *pBS);
- 
+
 private:
     int _iAddr;
     int _iType;
     uint32_t _u32Caps;
     BBI2C _bbi2c;
+    int64_t _t_fine;
     int32_t _calT1, _calT2, _calT3; // calibration data
-    int32_t _calP1, _calP2, _calP3, _calP4, _calP5, _calP6, _calP7, _calP8, _calP9;
+    int32_t _calP1, _calP2, _calP3, _calP4, _calP5, _calP6, _calP7, _calP8, _calP9, _calP10, _calP11;
     int32_t _calH1, _calH2, _calH3, _calH4, _calH5, _calH6;
     float _hts221HumiditySlope;
     float _hts221HumidityZero;
     float _hts221TemperatureSlope;
     float _hts221TemperatureZero;
+    int initInternal(void);
     void readMultiple(int iRegister, uint8_t *pData, int iCount);
-
+    double power(double base, uint8_t pow);
+    void resetBMP388(void);
 }; // class BBTemp
 #endif // __BB_TEMP__

@@ -27,6 +27,25 @@ int i;
     }
 } /* readMultiple() */ 
 
+double BBTemp::power(double base, uint8_t pow)
+{
+  double p_out = 1.0;
+
+  while (pow != 0) {
+    p_out = base * p_out;
+    pow--;
+  }
+  return p_out;
+} /* power() */
+
+void BBTemp::resetBMP388(void)
+{
+uint8_t ucTemp[4];
+   ucTemp[0] = BMP388_CMD_ADDR;
+   ucTemp[1] = BMP388_CMD_SOFTRESET;
+   I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+} /* resetBMP388() */
+
 //
 // Tell the sensor to start sampling
 //
@@ -34,8 +53,53 @@ int BBTemp::start(void)
 {
 uint8_t ucTemp[4];
 uint8_t ucCal[34];
+int16_t i16;
+uint32_t u32;
 
    switch (_iType) {
+      case BBT_TYPE_MCP9808:
+         // configure it
+         I2CReadRegister(&_bbi2c, _iAddr, MCP_REG_CONFIG, &ucTemp[1] ,2);
+         ucTemp[0] = MCP_REG_CONFIG;
+         ucTemp[1] &= 0x06;
+         ucTemp[1] |= 0x00;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
+         delay(100); // give it time to power up
+         break;
+
+      case BBT_TYPE_BMP388:
+         resetBMP388();
+         delay(10);
+         ucTemp[0] = BMP388_POWER_CTRL;
+         ucTemp[1] = 0x33; // enable normal power mode of T+P
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         delay(10);
+         // Read 21 bytes of calibration data
+         I2CReadRegister(&_bbi2c, _iAddr, BMP388_CALIB_DATA, ucCal, BMP388_CALIB_LEN); // 21 from register 0x31
+         // Prepare temperature calibration data
+         _calT1 = ucCal[0] | ((uint16_t)ucCal[1] << 8);
+         _calT2 = ucCal[2] | ((uint16_t)ucCal[3] << 8);
+         _calT3 = (int8_t)ucCal[4];
+
+         // Prepare pressure calibration data
+         _calP1 = (int16_t)(ucCal[5] | ((uint16_t)ucCal[6] << 8));
+         _calP2 = (int16_t)(ucCal[7] | ((uint16_t)ucCal[8] << 8));
+         _calP3 = (int8_t)ucCal[9];
+         _calP4 = (int8_t)ucCal[10];
+         _calP5 = (uint16_t)ucCal[11] + ((uint16_t)ucCal[12] << 8);
+         _calP6 = (uint16_t)ucCal[13] + ((uint16_t)ucCal[14] << 8);
+         _calP7 = (int8_t)ucCal[15];
+         _calP8 = (int8_t)ucCal[16];
+         _calP9 = (int16_t)(ucCal[17] | ((uint16_t)ucCal[18] << 8));
+         _calP10 = (int8_t)ucCal[19];
+         _calP11 = (int8_t)ucCal[20];
+
+         // Enable pressure + temperature and switch to normal mode
+         ucTemp[0] = BMP388_POWER_CTRL;
+         ucTemp[1] = 0x33; // normal power mode (0x30), both T+P (0x03)
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         break;
+
       case BBT_TYPE_AHT20:
          I2CRead(&_bbi2c, _iAddr, ucTemp, 1); // first byte read is status byte
          if ((ucTemp[0] & AHT20_CALIBRATED) == 0) { // need to init
@@ -167,6 +231,20 @@ void BBTemp::stop(void)
 uint8_t ucTemp[4];
 
    switch (_iType) {
+      case BBT_TYPE_MCP9808:
+         ucTemp[0] = MCP_REG_CONFIG; // config register
+         ucTemp[1] = 0x01; // shutdown mode
+         ucTemp[2] = 0x00;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 3);
+         break;
+
+      case BBT_TYPE_BMP388:
+         resetBMP388();
+         ucTemp[0] = BMP388_POWER_CTRL;
+         ucTemp[1] = 0; // put it in sleep mode
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 2);
+         break;
+
       case BBT_TYPE_AHT20:
          ucTemp[0] = AHT20_REG_RESET; // reset
          I2CWrite(&_bbi2c, _iAddr, ucTemp, 1);
@@ -193,14 +271,30 @@ uint8_t ucTemp[4];
 //
 int BBTemp::init(int iSDA, int iSCL, bool bBitBang, uint32_t u32Speed)
 {
-uint8_t ucTemp[4];
-int rc, iOff;
-
     _iType = -1;
     _bbi2c.bWire = !bBitBang; // use bit bang?
     _bbi2c.iSDA = iSDA;
     _bbi2c.iSCL = iSCL;
+#ifdef __LINUX__
+    _bbi2c.file_i2c = -1; // force it to create a new i2c handle
+#endif
     I2CInit(&_bbi2c, u32Speed);
+    return initInternal();
+} /* init() */
+
+int BBTemp::init(BBI2C *pBB)
+{
+    if (pBB) {
+        memcpy(&_bbi2c, pBB, sizeof(BBI2C));
+        return initInternal();
+    }
+    return BBT_ERROR;
+} /* init() */
+
+int BBTemp::initInternal(void)
+{
+    uint8_t ucTemp[4];
+    int rc, iOff;
 
     for (iOff=0; iOff<8; iOff++) { // I2C address permutations
         if (I2CTest(&_bbi2c, BBT_ADDR_AHT20+iOff)) { // check for AHT20
@@ -213,6 +307,17 @@ int rc, iOff;
            }
         } // if AHT20
 
+        if (I2CTest(&_bbi2c, BBT_ADDR_MCP9808+iOff)) {
+           I2CReadRegister(&_bbi2c, BBT_ADDR_MCP9808+iOff, MCP_REG_WHOAMI, ucTemp, 2);
+           if (ucTemp[0] == (uint8_t)(MCP_VAL_WHOAMI>>8) && ucTemp[1] == (uint8_t)(MCP_VAL_WHOAMI & 0xff)) {
+
+              _iAddr = BBT_ADDR_MCP9808+iOff;
+              _iType = BBT_TYPE_MCP9808;
+              _u32Caps = BBT_CAP_TEMPERATURE;
+              return BBT_SUCCESS;
+           }
+        } // if MCP9808
+
         if (I2CTest(&_bbi2c, BBT_ADDR_HTS221+iOff)) { // check for HTS221
            rc = I2CReadRegister(&_bbi2c, BBT_ADDR_HTS221+iOff, HTS221_WHO_AM_I_REG, ucTemp, 1);
            if (rc && ucTemp[0] == HTS221_WHO_AM_I_VAL) {
@@ -222,6 +327,16 @@ int rc, iOff;
               return BBT_SUCCESS;
            }
         } // if HTS221
+
+        if (I2CTest(&_bbi2c, BBT_ADDR_BMP388+iOff)) { // check for BMP388
+           rc = I2CReadRegister(&_bbi2c, BBT_ADDR_BMP388+iOff, 0, ucTemp, 1); // Read ID register
+           if (rc && ucTemp[0] == 0x50) {
+              _iAddr = BBT_ADDR_BMP388+iOff;
+              _iType = BBT_TYPE_BMP388;
+              _u32Caps = BBT_CAP_TEMPERATURE | BBT_CAP_PRESSURE;
+              return BBT_SUCCESS;
+           }
+        } // if BMP388 
 
         if (I2CTest(&_bbi2c, BBT_ADDR_BME280+iOff)) { // check for Bosch BME280
            rc = I2CReadRegister(&_bbi2c, BBT_ADDR_BME280+iOff, BME280_REG_WHOAMI, ucTemp, 1);
@@ -276,6 +391,79 @@ uint32_t ST, SRH;
 int bReady;
 
    switch (_iType) {
+      case BBT_TYPE_MCP9808:
+         ucTemp[0] = MCP_REG_TEMPERATURE;
+         I2CWrite(&_bbi2c, _iAddr, ucTemp, 1); // trigger a sample
+         I2CRead(&_bbi2c, _iAddr, ucTemp, 2); // read 16-bit temperature
+         pBS->temperature = (uint16_t)(ucTemp[0]<<8) + ucTemp[1];
+         pBS->temperature &= 0x1fff; // mask off flag bits
+         if ((pBS->temperature & 0x1000) == 0x1000) // negative
+            pBS->temperature = 0x2000 - pBS->temperature;
+         pBS->temperature = ((pBS->temperature * 10) >> 4); // 10x temp
+         break;
+
+      case BBT_TYPE_BMP388:
+         {
+         int32_t t;
+
+         uint64_t partial_data1;
+         uint64_t partial_data2;
+         uint64_t partial_data3;
+         int64_t partial_data4;
+         int64_t partial_data5;
+         int64_t partial_data6;
+         int64_t comp_temp;
+
+         I2CReadRegister(&_bbi2c, _iAddr, BMP388_DATA_ADDR, ucTemp, BMP388_DATA_LEN); // start of data regs
+         t = (uint32_t)ucTemp[3] + ((uint32_t)ucTemp[4] << 8) + ((uint32_t)ucTemp[5] << 16);
+         // Calculate calibrated temperature value
+         partial_data1 = (uint64_t)(t - (256 * (uint64_t)(_calT1)));
+         partial_data2 = (uint64_t)(_calT2 * partial_data1);
+         partial_data3 = (uint64_t)(partial_data1 * partial_data1);
+         partial_data4 = (int64_t)(((int64_t)partial_data3) * ((int64_t)_calT3));
+         partial_data5 = ((int64_t)(((int64_t)partial_data2) * 262144) + (int64_t)partial_data4);
+         partial_data6 = (int64_t)(((int64_t)partial_data5) / 4294967296U);
+         _t_fine = partial_data6;
+         pBS->temperature = (int64_t)((partial_data6 * 25)  / 163840);
+         }
+         {
+         int32_t p;
+         int64_t partial_data1;
+         int64_t partial_data2;
+         int64_t partial_data3;
+         int64_t partial_data4;
+         int64_t partial_data5;
+         int64_t partial_data6;
+         int64_t offset;
+         int64_t sensitivity;
+
+         p = (uint32_t)ucTemp[0] + ((uint32_t)ucTemp[1] << 8) + ((uint32_t)ucTemp[2] << 16);
+
+         // Calculate calibrated pressure value
+         partial_data1 = _t_fine * _t_fine;
+         partial_data2 = partial_data1 / 64;
+         partial_data3 = (partial_data2 * _t_fine) / 256;
+         partial_data4 = (_calP8 * partial_data3) / 32;
+         partial_data5 = (_calP7 * partial_data1) * 16;
+         partial_data6 = (_calP6 * _t_fine) * 4194304;
+         offset = (int64_t)((int64_t)(_calP5) * (int64_t)140737488355328U) + partial_data4 + partial_data5 + partial_data6;
+         partial_data2 = (((int64_t)_calP4) * partial_data3) / 32;
+         partial_data4 = (_calP3 * partial_data1) * 4;
+         partial_data5 = ((int64_t)(_calP2) - 16384) * ((int64_t)_t_fine) * 2097152;
+         sensitivity = (((int64_t)(_calP1) - 16384) * (int64_t)70368744177664U) + partial_data2 + partial_data4 + partial_data5;
+         partial_data1 = (sensitivity / 16777216) * p;
+         partial_data2 = (int64_t)(_calP10) * (int64_t)(_t_fine);
+         partial_data3 = partial_data2 + (65536 * (int64_t)(_calP9));
+         partial_data4 = (partial_data3 * p) / 8192;
+         partial_data5 = (partial_data4 * p) / 512;
+         partial_data6 = (int64_t)((uint64_t)p * (uint64_t)p);
+         partial_data2 = ((int64_t)(_calP11) * (int64_t)(partial_data6)) / 65536;
+         partial_data3 = (partial_data2 * p) / 128;
+         partial_data4 = (offset / 4) + partial_data1 + partial_data5 + partial_data3;
+         pBS->pressure = (((uint64_t)partial_data4 * 25) / (uint64_t)1099511627776U);
+         }
+         break;
+
       case BBT_TYPE_HTS221:
          {
          uint16_t t, h;
