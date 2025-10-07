@@ -36,8 +36,7 @@ int i;
 	obd.I2Cbegin(OLED_128x64, 0x3c);
 	obd.fillScreen(OBD_WHITE); // color is relative to B/W LCDs
 	obd.setFont(FONT_12x16);
-	obd.drawString("BitBank", 0, 0);
-	obd.drawString("bb_temp", 0, 16);
+	obd.drawString(szDevices[bbt.type()], 0, 0);
         obd.setFont(FONT_8x8);
 	bbt.start(); // start reading sample values
 	while (1) {
